@@ -2,7 +2,7 @@ import os
 import random
 import logging
 import time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from pymongo import MongoClient
 
@@ -21,8 +21,19 @@ scores_col = db['scores']
 
 active_games = {}
 
+# --- KOMANDALARIN MENYUDA GÖRÜNMƏSİ ÜÇÜN FUNKSİYA ---
+async def set_bot_commands(application: Application):
+    commands = [
+        BotCommand("start", "Botu başladın və menyunu görün"),
+        BotCommand("baslat", "Yeni 25 turluq oyun başladın"),
+        BotCommand("siralama", "Qrupdakı cari xalları görün"),
+        BotCommand("top", "Qlobal (Dünya) sıralamanı görün"),
+        BotCommand("help", "Oyun qaydaları haqqında məlumat"),
+        BotCommand("bitir", "Aktiv oyunu dayandırın (Adminlər üçün)")
+    ]
+    await application.bot.set_my_commands(commands)
+
 def get_random_range():
-    """Hər tur üçün təsadüfi bir rəqəm aralığı yaradır"""
     start_num = random.randint(1, 500)
     end_num = start_num + random.randint(50, 1000)
     target = random.randint(start_num, end_num)
@@ -95,31 +106,26 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     
     if user_guess < game["target"]:
-        await update.message.reply_text(f"🔼 {user_guess} - Daha YUXARI!")
+        await update.message.reply_text(f"🔼 {user_guess} - Daha böyük rəqəm daxil edin!")
     elif user_guess > game["target"]:
-        await update.message.reply_text(f"🔽 {user_guess} - Daha AŞAĞI!")
+        await update.message.reply_text(f"🔽 {user_guess} - Daha kiçik rəqəm daxil edin!")
     else:
-        # Xal hesablama logic-i
         earned_points = 1
         bonus_msg = ""
         
-        # ⚡ Sürət Bonusu (10 saniyə ərzində tapsa)
         if time.time() - game["start_time"] < 10:
             earned_points += 1
             bonus_msg += "⚡ **SÜRƏT BONUSU! (+1)** "
 
-        # 🎁 Şans Turu (Hər 5-ci turda +2 əlavə xal, cəmi 3 xal)
         if game["turn"] % 5 == 0:
             earned_points += 2
             bonus_msg += "🎁 **ŞANS TURU BONUSU! (+2)**"
 
-        # Xalları qeyd et
         uid_str = str(user_id)
         if uid_str not in game["current_scores"]:
             game["current_scores"][uid_str] = [user_name, 0]
         game["current_scores"][uid_str][1] += earned_points
         
-        # MongoDB-də qlobal xalı yenilə
         scores_col.update_one(
             {"user_id": user_id}, 
             {"$inc": {"total_points": earned_points}, "$set": {"name": user_name}}, 
@@ -137,7 +143,6 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🔢 Yeni aralıq: **{s} - {e}**"
             )
         else:
-            # Final Sıralama
             sorted_res = sorted(game["current_scores"].items(), key=lambda x: x[1][1], reverse=True)
             leaderboard = "🏆 **OYUN BİTDİ! YEKUN SIRALAMA:**\n\n"
             for i, (uid, data) in enumerate(sorted_res, 1):
@@ -150,15 +155,12 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del active_games[chat_id]
 
 async def top_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # MongoDB-dən ilk 10 oyunçunu çək
     top_players = scores_col.find().sort("total_points", -1).limit(10)
-    
     res = "🌍 **Qlobal Top 10 Oyunçu:**\n\n"
     for i, player in enumerate(top_players, 1):
         name = player.get("name", "İstifadəçi")
         points = player.get("total_points", 0)
         res += f"{i}. {name} — {points} xal\n"
-    
     await update.message.reply_text(res, parse_mode="Markdown")
 
 async def siralama(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,7 +173,6 @@ async def siralama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = f"📊 **Cari Sıralama (Tur {game['turn']}/25):**\n\n"
     for i, (uid, data) in enumerate(sorted_res, 1):
         res += f"{i}. {data[0]} — {data[1]} xal\n"
-    
     await update.message.reply_text(res, parse_mode="Markdown")
 
 async def bitir(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,6 +187,10 @@ def main():
         return
 
     app = Application.builder().token(TOKEN).build()
+
+    # --- KOMANDALARI QEYDƏ ALMAQ ÜÇÜN POST_INIT ---
+    app.post_init = set_bot_commands
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("baslat", baslat))
