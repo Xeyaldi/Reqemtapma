@@ -2,28 +2,24 @@ import os
 import random
 import logging
 import time
-from io import BytesIO  # Şəkil yaratmaq üçün lazımdır (YENİ)
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, InputFile  # InputFile əlavə edildi (YENİ)
+from io import BytesIO
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from pymongo import MongoClient
-from PIL import Image, ImageDraw, ImageFont  # Pillow kitabxanası (YENİ - Quraşdırma lazımdır: pip install Pillow)
+from PIL import Image, ImageDraw, ImageFont
 
-# Log sistemi
 logging.basicConfig(level=logging.INFO)
 
-# Heroku Config Vars
 TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "kullaniciadidi")
 
-# MongoDB Bağlantısı (Dəyişilməyib)
 client = MongoClient(MONGO_URL)
 db = client['game_bot_db']
 scores_col = db['scores']
 
 active_games = {}
 
-# --- KOMANDALARIN MENYUDA GÖRÜNMƏSİ ---
 async def set_bot_commands(application: Application):
     commands = [
         BotCommand("start", "Botu başladın və menyunu görün"),
@@ -40,14 +36,12 @@ def get_random_range():
     end_num = start_num + random.randint(50, 1000)
     target = random.randint(start_num, end_num)
     
-    # 💥 **Bomba Rəqəm Yarat (Hədəfdən fərqli, amma aralıqda) (YENİ)**
     bomb_num = target
     while bomb_num == target:
         bomb_num = random.randint(start_num, end_num)
         
-    return start_num, end_num, target, bomb_num  # Bomb_num qaytarılır
+    return start_num, end_num, target, bomb_num
 
-# --- ANA MENYU DÜYMƏLƏRİ ---
 def get_start_keyboard(bot_username):
     keyboard = [
         [InlineKeyboardButton("➕ Məni Qrupa Əlavə Et", url=f"https://t.me/{bot_username}?startgroup=true")],
@@ -55,7 +49,7 @@ def get_start_keyboard(bot_username):
             InlineKeyboardButton("ℹ️ Kömək", callback_data='help_menu'),
             InlineKeyboardButton("👨‍💻 Sahib", url=f"https://t.me/{OWNER_USERNAME}")
         ],
-        [InlineKeyboardButton("📢 Rəsmi Kanal", url="https://t.me/ht_bots")]
+        [InlineKeyboardButton("📢 Kanalımız", url="https://t.me/ht_bots")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -69,11 +63,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌍 /reqemtop yazaraq dünya sıralamasını görə bilərsiniz."
     )
     if update.message:
-        await update.message.reply_text(text, reply_markup=get_start_keyboard(bot_obj.username), parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=get_start_keyboard(bot_obj.username), parse_mode=None)
     else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=get_start_keyboard(bot_obj.username), parse_mode="Markdown")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=get_start_keyboard(bot_obj.username), parse_mode=None)
 
-# --- KÖMƏK MENYUSU VƏ CALLBACK (YENİ ƏLAVƏ, SİLMƏ YOXDUR) ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -90,7 +83,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "💡 Qaydalar: Rəqəmi tapan +1 xal qazanır. Sürətli tapanlara və şans turlarına (hər 5 turdan bir) bonus xallar verilir!"
         )
         keyboard = [[InlineKeyboardButton("⬅️ Geri", callback_data='back_to_start')]]
-        await query.edit_message_text(text=help_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text(text=help_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=None)
     
     elif query.data == 'back_to_start':
         text = (
@@ -98,7 +91,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎮 Qruplarda rəqəm tapma yarışı keçirirəm.\n"
             "🌍 /reqemtop yazaraq dünya sıralamasını görə bilərsiniz."
         )
-        await query.edit_message_text(text=text, reply_markup=get_start_keyboard(bot_obj.username), parse_mode="Markdown")
+        await query.edit_message_text(text=text, reply_markup=get_start_keyboard(bot_obj.username), parse_mode=None)
 
 async def baslat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -108,54 +101,44 @@ async def baslat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id in active_games:
         return await update.message.reply_text("⚠️ Artıq davam edən bir oyun var!")
 
-    # 💥 Bomb_num əlavə edildi (YENİ)
     s, e, t, b = get_random_range()
     active_games[chat_id] = {
-        "start_num": s, "end_num": e, "target": t, "bomb_num": b, # Bomba rəqəm yadda saxlanılır (YENİ)
+        "start_num": s, "end_num": e, "target": t, "bomb_num": b,
         "turn": 1, "start_time": time.time(), "current_scores": {}
     }
     await update.message.reply_text(f"🎮 Oyun Başladı! (Tur 1/25)\n🔢 Aralıq: {s} - {e}")
 
-# --- 🎨 VİZUAL SIRALAMA KARTI YARADAN FUNKSİYA (YENİ FUNKSİYA) ---
 def create_leaderboard_image(scores_data):
-    # Sadə bir vizual kart yaratmaq (600x800)
     width, height = 600, 800
-    image = Image.new('RGB', (width, height), color=(30, 30, 30))  # Tünd fon
+    image = Image.new('RGB', (width, height), color=(30, 30, 30))
     draw = ImageDraw.Draw(image)
 
-    # Şriftlər (Default şrift istifadə edilir, çünki sistemdə şrift olmaya bilər)
     font_title = ImageFont.load_default()
     font_text = ImageFont.load_default()
 
-    # Başlıq
     draw.text((width // 2, 50), "🏆 OYUN BİTDİ!", fill=(255, 215, 0), font=font_title, anchor="ms")
     draw.text((width // 2, 100), "Yekun Sıralama", fill=(255, 255, 255), font=font_title, anchor="ms")
     
-    # Sıralama mətnini qurmaq (SİLMƏDİM!)
     y_offset = 180
     sorted_res = sorted(scores_data.items(), key=lambda x: x[1][1], reverse=True)
     
     for i, (uid, data) in enumerate(sorted_res, 1):
-        if i > 15: break  # Maksimum 15 nəfəri göstər
+        if i > 15: break
         
-        # Mətn rəngini dəyişmək (TOP 3 üçün fərqli)
-        text_color = (255, 255, 255)  # Ağ
-        if i == 1: text_color = (255, 215, 0)  # Qızıl
-        elif i == 2: text_color = (192, 192, 192)  # Gümüş
-        elif i == 3: text_color = (205, 127, 50)  # Bürünc
+        text_color = (255, 255, 255)
+        if i == 1: text_color = (255, 215, 0)
+        elif i == 2: text_color = (192, 192, 192)
+        elif i == 3: text_color = (205, 127, 50)
             
         text = f"{i}. {data[0]} — {data[1]} xal"
         draw.text((100, y_offset), text, fill=text_color, font=font_text)
         y_offset += 40
 
-    # Qalibi elan etmək
     winner = sorted_res[0][1][0] if sorted_res else "Heç kim"
     draw.text((width // 2, 700), f"🥇 Mütləq Qalib: {winner}", fill=(255, 215, 0), font=font_title, anchor="ms")
 
-    # Kanal linki (YENİ)
     draw.text((width // 2, 760), "@ht_bots", fill=(100, 100, 100), font=font_text, anchor="ms")
 
-    # Şəkli yaddaşa yazmaq
     img_io = BytesIO()
     image.save(img_io, 'PNG')
     img_io.seek(0)
@@ -171,28 +154,24 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     
-    # 💥 **Bomba Rəqəmi Yoxla (YENİ)**
     if user_guess == game["bomb_num"]:
-        earned_points = -1  # Xal çıxılır
-        bonus_msg = f"💥 **UPPS BOMBAYA BASDIN 😔! {user_name} (-1 Xal)!**"
+        earned_points = -1
+        bonus_msg = f"💥 BOMMm minaya basdın😕! {user_name} (-1 Xal)!"
         
-        # Xal sisteminə toxunmadım (sadəcə dəyişəni yenilədim)
         uid_str = str(user_id)
         if uid_str not in game["current_scores"]:
             game["current_scores"][uid_str] = [user_name, 0]
         game["current_scores"][uid_str][1] += earned_points
         scores_col.update_one({"user_id": user_id}, {"$inc": {"total_points": earned_points}, "$set": {"name": user_name}}, upsert=True)
         
-        await update.message.reply_text(bonus_msg, parse_mode="Markdown")
-        return # Bomba tapıldısa, tur bitmir, sadəcə xal çıxılır.
+        await update.message.reply_text(bonus_msg, parse_mode=None)
+        return
 
-    # Mövcud tapma məntiqi (MÖVCUD KOD, TOXUNMADIM!)
     if user_guess < game["target"]:
         await update.message.reply_text(f"🔼 Daha böyük rəqəm daxil edin")
     elif user_guess > game["target"]:
         await update.message.reply_text(f"🔽 Daha kiçik rəqəm daxil edin")
     else:
-        # Xallar (SİLMƏDİM!)
         earned_points = 1
         bonus_msg = ""
         if time.time() - game["start_time"] < 10:
@@ -211,29 +190,25 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if game["turn"] < 25:
             game["turn"] += 1
-            # 💥 Bomb_num yeniləndi (YENİ)
             s, e, t, b = get_random_range()
             game.update({"start_num": s, "end_num": e, "target": t, "bomb_num": b, "start_time": time.time()})
             await update.message.reply_text(f"✅ Düzdür {user_name}! (+{earned_points} xal)\n{bonus_msg}\n\n🏁 Tur {game['turn']}/25 başladı.\n🔢 Yeni aralıq: {s} - {e}")
         else:
-            # --- 🎨 VİZUAL SIRALAMA KARTINI GÖNDƏRMƏK (MÖVCUD MƏTNİ SİLMƏDİM!) ---
-            await update.message.reply_text("🏆 Oyun Bitdi! Yekun sıralama hazırlanır...", parse_mode="Markdown")
+            await update.message.reply_text("🏆 Oyun Bitdi! Yekun sıralama hazırlanır...", parse_mode=None)
             
-            # Şəkli yarat və göndər (YENİ)
             try:
                 leaderboard_image = create_leaderboard_image(game["current_scores"])
                 await context.bot.send_photo(chat_id=chat_id, photo=InputFile(leaderboard_image, filename="leaderboard.png"), caption="@ht_bots Qaliblər!")
             except Exception as e:
                 logging.error(f"Vizual kart xətası: {e}")
                 
-            # Mövcud mətn sıralamasını da göndərmək (Silmədim!)
             sorted_res = sorted(game["current_scores"].items(), key=lambda x: x[1][1], reverse=True)
-            leaderboard_text = "🏆 **OYUN BİTDİ! YEKUN SIRALAMA:**\n\n"
+            leaderboard_text = "🏆 OYUN BİTDİ! YEKUN SIRALAMA:\n\n"
             for i, (uid, data) in enumerate(sorted_res, 1):
                 leaderboard_text += f"{i}. {data[0]} — {data[1]} xal\n"
             winner = sorted_res[0][1][0] if sorted_res else "Heç kim"
-            leaderboard_text += f"\n🥇 **Mütləq Qalib:** {winner}"
-            await update.message.reply_text(leaderboard_text, parse_mode="Markdown")
+            leaderboard_text += f"\n🥇 Mütləq Qalib: {winner}"
+            await update.message.reply_text(leaderboard_text, parse_mode=None)
 
             del active_games[chat_id]
 
@@ -242,7 +217,7 @@ async def top_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = "🌍 Qlobal Top 10 Oyunçu:\n\n"
     for i, player in enumerate(top_players, 1):
         res += f"{i}. {player.get('name', 'İstifadəçi')} — {player.get('total_points', 0)} xal\n"
-    await update.message.reply_text(res, parse_mode="Markdown")
+    await update.message.reply_text(res, parse_mode=None)
 
 async def siralama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -253,7 +228,7 @@ async def siralama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = f"📊 Cari Sıralama (Tur {game['turn']}/25):\n\n"
     for i, (uid, data) in enumerate(sorted_res, 1):
         res += f"{i}. {data[0]} — {data[1]} xal\n"
-    await update.message.reply_text(res, parse_mode="Markdown")
+    await update.message.reply_text(res, parse_mode=None)
 
 async def bitir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id in active_games:
