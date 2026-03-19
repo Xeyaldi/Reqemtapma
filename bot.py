@@ -105,7 +105,7 @@ async def baslat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "start_num": s, "end_num": e, "target": t,
         "turn": 1, "start_time": time.time(), "current_scores": {}
     }
-    await update.message.reply_text(f"🎮 **Oyun Başladı! (Tur 1/25)**\n🔢 Aralıq: **{s} - {e}**")
+    await update.message.reply_text(f"🎮 **Oyun Başladı! (Tur 1/25)\n🔢 Aralıq: {s} - {e}")
 
 async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -118,9 +118,9 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     
     if user_guess < game["target"]:
-        await update.message.reply_text(f"🔼 {user_guess} - Daha böyük rəqəm daxil edin !")
+        await update.message.reply_text(f"🔼 Daha böyük rəqəm daxil edin !")
     elif user_guess > game["target"]:
-        await update.message.reply_text(f"🔽 {user_guess} - Daha kiçik rəqəm daxil edin !")
+        await update.message.reply_text(f"🔽 Daha kiçik rəqəm daxil edin !")
     else:
         # Xallar (SİLMƏDİM!)
         earned_points = 1
